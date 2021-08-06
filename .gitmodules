@@ -1,0 +1,3 @@
+[submodule "htmlbuilder"]
+	path = htmlbuilder
+	url = https://github.com/frankiebaffa/htmlbuilder-rs
