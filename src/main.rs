@@ -19,65 +19,8 @@ enum ParsePos {
     AttrValOpen,
     AttrVal,
     AttrValClose,
+    PostAttr,
     Text,
-}
-struct Element {
-    name: String,
-    id: String,
-    classes: Vec<String>,
-    attributes: Vec<(String, String)>,
-    text: String,
-    indent: usize,
-}
-impl Element {
-    fn to_string(&self) -> String {
-        let mut name_str = String::new();
-        let mut dlim = "";
-        if !self.name.is_empty() {
-            name_str.push_str(self.name.as_str());
-            dlim = " ";
-        }
-        let mut id_str = String::new();
-        if !self.id.is_empty() {
-            id_str.push_str(dlim);
-            id_str.push_str("id=\"");
-            id_str.push_str(self.id.as_str());
-            id_str.push_str("\"");
-            dlim = " ";
-        }
-        let mut class_str = String::new();
-        let mut class_dlim = "";
-        if self.classes.len() != 0 {
-            class_str.push_str(dlim);
-            class_str.push_str("class=\"");
-            for class in self.classes.clone() {
-                class_str.push_str(class_dlim);
-                class_str.push_str(class.as_str());
-                class_dlim = " ";
-            }
-            class_str.push_str("\"");
-            dlim = " ";
-        }
-        let mut attr_str = String::new();
-        if self.attributes.len() != 0 {
-            for attr in self.attributes.clone() {
-                attr_str.push_str(format!("{}{}=\"{}\"", dlim, attr.0, attr.1).as_str());
-                dlim = " ";
-            }
-        }
-        return format!("<{}{}{}{}>{}</{}>", name_str, id_str, class_str, attr_str, self.text, name_str);
-    }
-}
-trait DocBuilder {
-    fn to_document(&self) -> Document;
-}
-impl DocBuilder for Vec<Element> {
-    fn to_document(&self) -> Document {
-        for element in self {
-
-        }
-        return doc;
-    }
 }
 #[derive(Clap)]
 #[clap(version = "0.1", author = "Frankie Baffa <frankiebaffa@gmail.com>")]
@@ -135,16 +78,46 @@ fn throw_parser_error<'a>(start_time: SystemTime, parse_map: Vec<(ParsePos, char
     println!("Message: {}\n", msg);
     std::process::exit(1);
 }
-fn get_parser_success_string(start_time: SystemTime, parse_map: Vec<(ParsePos, char)>, elements: Vec<Element>, debug: bool) {
+fn get_parser_success_string(start_time: SystemTime, parse_map: Vec<(ParsePos, char)>, debug: bool) {
     let diff = get_time_diff_string(start_time);
     println!("Parser succeeded in {}\n", diff);
     if debug {
         println!("Stack:\n{}\n", get_stack_string(parse_map, 0));
     }
-    println!("Elements:\n");
-    for element in elements {
-        println!("{}", element.to_string());
+    //println!("Elements:\n");
+    //for element in elements {
+    //    println!("{}", element.to_string());
+    //}
+}
+struct NestInfo {
+    level: usize,
+    line: usize,
+    element: HtmlElement,
+}
+fn recurse_nest(mut index: usize, elements: &mut Vec<NestInfo>, prev: &mut NestInfo) -> HtmlElement {
+    let mut curr = match elements.get(index.clone()) {
+        Some(item) => item,
+        None => panic!("Nest error. Index {} is out of bounds", index),
+    };
+    if curr.level > prev.level {
+        index = index + 1;
+        recurse_nest(index, elements, );
     }
+    return HtmlElement::new(false, "something");
+}
+fn nest_elements(elements: &mut Vec<NestInfo>) -> Vec<HtmlElement> {
+    let nest = Vec::new();
+    let mut index: usize = 0;
+    let mut prev = match elements.get(index) {
+        Some(item) => item,
+        None => panic!("Nest error. Index 0 is out of bounds"),
+    };
+    index = index + 1;
+    while index < elements.len() {
+        recurse_nest(index, elements, &mut prev);
+        index = index + 1;
+    }
+    return nest;
 }
 fn main() {
     let opts: Opts = Clap::parse();
@@ -177,6 +150,7 @@ fn main() {
     let mut parse_map: Vec<(ParsePos, char)> = Vec::new();
     let mut line_num: usize = 1;
     let mut doc = Document::new_html5();
+    let mut elements: Vec<NestInfo> = Vec::new();
     for mut line in file_string.lines() {
         if line.len() == 0 {
             continue;
@@ -195,6 +169,7 @@ fn main() {
         let mut attributes: Vec<(String, String)> = Vec::new();
         let mut text: String = String::new();
         let mut parse_pos: ParsePos = ParsePos::TagName;
+        let mut is_only_text: bool = false;
         for c in line.chars() {
             parse_map.push((parse_pos.clone(), c));
             match c {
@@ -204,8 +179,19 @@ fn main() {
                             if name.is_empty() {
                                 name.push_str("div");
                             }
-                            parse_pos = ParsePos::Id;
-                            continue;
+                            match Tag::from_tag_name(&name) {
+                                Ok(_) => {
+                                    parse_pos = ParsePos::Id;
+                                    continue;
+                                },
+                                Err(_) => {
+                                    text.push_str(&name);
+                                    text.push(c);
+                                    parse_pos = ParsePos::Text;
+                                    is_only_text = true;
+                                    continue;
+                                },
+                            }
                         },
                         ParsePos::Id => {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. A '#' cannot follow a '#' in the header line of an element");
@@ -237,6 +223,14 @@ fn main() {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. A '#' cannot be located within the attribute enclosure");
                             return;
                         },
+                        ParsePos::PostAttr => {
+                            if !id.is_empty() {
+                                throw_parser_error(start_time, parse_map, line_num, "Parse error. An element cannot have two ids");
+                                return;
+                            }
+                            parse_pos = ParsePos::Id;
+                            continue;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -249,8 +243,19 @@ fn main() {
                             if name.is_empty() {
                                 name.push_str("div");
                             }
-                            parse_pos = ParsePos::Class;
-                            continue;
+                            match Tag::from_tag_name(&name) {
+                                Ok(_) => {
+                                    parse_pos = ParsePos::Class;
+                                    continue;
+                                },
+                                Err(_) => {
+                                    text.push_str(&name);
+                                    is_only_text = true;
+                                    text.push(c);
+                                    parse_pos = ParsePos::Text;
+                                    continue;
+                                },
+                            }
                         },
                         ParsePos::Id => {
                             if id.is_empty() {
@@ -285,6 +290,10 @@ fn main() {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. The only valid characters after the closing of an attribute value are ',' and ')'");
                             return;
                         },
+                        ParsePos::PostAttr => {
+                            parse_pos = ParsePos::Class;
+                            continue;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -297,8 +306,19 @@ fn main() {
                             if name.is_empty() {
                                 name.push_str("div");
                             }
-                            parse_pos = ParsePos::AttrKey;
-                            continue;
+                            match Tag::from_tag_name(&name) {
+                                Ok(_) => {
+                                    parse_pos = ParsePos::AttrKey;
+                                    continue;
+                                },
+                                Err(_) => {
+                                    text.push_str(&name);
+                                    is_only_text = true;
+                                    text.push(c);
+                                    parse_pos = ParsePos::Text;
+                                    continue;
+                                },
+                            }
                         },
                         ParsePos::Id => {
                             if id.is_empty() {
@@ -334,6 +354,10 @@ fn main() {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. ',' and ')' are the only valid characters following an element attribute value closure");
                             return;
                         },
+                        ParsePos::PostAttr => {
+                            throw_parser_error(start_time, parse_map, line_num, "Parse error. Concatenate the attribute enclusures, only one is allowed");
+                            return;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -343,8 +367,8 @@ fn main() {
                 '\u{003d}' => { // =
                     match parse_pos {
                         ParsePos::TagName => {
-                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A '=' cannot be found in an element's name");
-                            return;
+                            parse_pos = ParsePos::Text;
+                            continue;
                         },
                         ParsePos::Id => {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. A '=' cannot be found in an element's id");
@@ -370,6 +394,10 @@ fn main() {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. Only a ',' or a ')' can follow the closure of an element's attribute's value");
                             return;
                         },
+                        ParsePos::PostAttr => {
+                            throw_parser_error(start_time, parse_map, line_num, "Parse error. '=' is not allowed following an attribute enclosure");
+                            return;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -379,8 +407,8 @@ fn main() {
                 '\u{0027}'|'\u{0022}' => { // ' or "
                     match parse_pos {
                         ParsePos::TagName => {
-                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A '\'' or '\"' cannot be found in an element's name");
-                            return;
+                            parse_pos = ParsePos::Text;
+                            continue;
                         },
                         ParsePos::Id => {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. A '\'' or '\"' cannot be found in an element's id");
@@ -409,6 +437,10 @@ fn main() {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. Only the ')' or ',' character may be found following an element's attribute's value");
                             return;
                         },
+                        ParsePos::PostAttr => {
+                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A '\"' or '\"' may not directly follow an attribute enclosure");
+                            return;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -418,8 +450,8 @@ fn main() {
                 '\u{002c}' => { // ,
                     match parse_pos {
                         ParsePos::TagName => {
-                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A ',' cannot be found in a tag name");
-                            return;
+                            parse_pos = ParsePos::Text;
+                            continue;
                         },
                         ParsePos::Id => {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. A ',' cannot be found in an element's id");
@@ -450,6 +482,10 @@ fn main() {
                             parse_pos = ParsePos::AttrKey;
                             continue;
                         },
+                        ParsePos::PostAttr => {
+                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A ',' character cannot directly follow an attribute enclosure");
+                            return;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -459,8 +495,8 @@ fn main() {
                 '\u{0029}' => { // )
                     match parse_pos {
                         ParsePos::TagName => {
-                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A ')' cannot be found in a tag name");
-                            return;
+                            parse_pos = ParsePos::Text;
+                            continue;
                         },
                         ParsePos::Id => {
                             throw_parser_error(start_time, parse_map, line_num, "Parse error. A ')' cannot be found in an element's id");
@@ -475,6 +511,7 @@ fn main() {
                             attributes.push((curr_key, curr_val));
                             curr_key = String::new();
                             curr_val = String::new();
+                            parse_pos = ParsePos::PostAttr;
                             continue;
                         },
                         ParsePos::AttrValOpen => {
@@ -486,7 +523,12 @@ fn main() {
                             return;
                         },
                         ParsePos::AttrValClose => {
+                            parse_pos = ParsePos::PostAttr;
                             continue;
+                        },
+                        ParsePos::PostAttr => {
+                            throw_parser_error(start_time, parse_map, line_num, "Parse error. A ')' character may not directly follow an attribute enclosure");
+                            return;
                         },
                         ParsePos::Text => {
                             text.push(c);
@@ -500,8 +542,19 @@ fn main() {
                             if name.is_empty() {
                                 name.push_str("div");
                             }
-                            parse_pos = ParsePos::Text;
-                            continue;
+                            match Tag::from_tag_name(&name) {
+                                Ok(_) => {
+                                    parse_pos = ParsePos::Text;
+                                    continue;
+                                },
+                                Err(_) => {
+                                    text.push_str(&name);
+                                    is_only_text = true;
+                                    text.push(c);
+                                    parse_pos = ParsePos::Text;
+                                    continue;
+                                },
+                            }
                         },
                         ParsePos::Id => {
                             if id.is_empty() {
@@ -534,6 +587,10 @@ fn main() {
                             continue;
                         },
                         ParsePos::AttrValClose => {
+                            parse_pos = ParsePos::Text;
+                            continue;
+                        },
+                        ParsePos::PostAttr => {
                             parse_pos = ParsePos::Text;
                             continue;
                         },
@@ -573,6 +630,10 @@ fn main() {
                             parse_pos = ParsePos::AttrValOpen;
                             continue;
                         },
+                        ParsePos::PostAttr => {
+                            throw_parser_error(start_time, parse_map, line_num, format!("Parse error. '{}' can not directly follow an attribute enclosure", c).as_str());
+                            return;
+                        },
                         ParsePos::Text => {
                             text.push(c);
                             continue;
@@ -604,42 +665,40 @@ fn main() {
             },
             _ => {},
         }
-        let tag_name = match Tag::from_tag_name(&name) {
-            Ok(tag_name) => tag_name,
-            Err(e) => {
-                println!("{}", e);
-                std::process::exit(1);
-            },
-        };
-        let elem = doc.create_element(tag_name);
-        if !id.is_empty() {
-            elem.id(&id);
+        if name.eq(&"doctype") {
+            // TODO: Add support for other doctypes
+            continue;
         }
-        for class in classes {
-            elem.class(&class);
-        }
-        for attr in attributes {
-            let a = Attr {
-                key: attr.0,
-                val: attr.1,
+        let mut elem;
+        if is_only_text && !text.is_empty() {
+            elem = HtmlElement::new_text(&text);
+        } else {
+            let tag_name = match Tag::from_tag_name(&name) {
+                Ok(tag_name) => tag_name,
+                Err(e) => {
+                    println!("{}", e);
+                    std::process::exit(1);
+                },
             };
-            elem.attrs.push(a);
+            elem = doc.create_element(tag_name);
+            if !id.is_empty() {
+                elem.id(&id);
+            }
+            for class in classes {
+                elem.class(&class);
+            }
+            for attr in attributes {
+                elem.attr(Attr::from_name(attr.0.as_str(), attr.1.as_str()));
+            }
         }
         if !text.is_empty() {
             elem.inner_text(text.as_str());
         }
-        if elem.tag_name.eq(&"Head") {
-            is_head = true;
-            head_pos = dent;
-        }
-        if dent > head_pos && is_head {
-            doc.append_head(elem);
-        } else if dent <= head_pos && is_head {
-            doc.append_body(elem);
-        }
+        elements.push(NestInfo { level: dent, line: line_num, element: elem, });
         line_num = line_num + 1;
     }
-    get_parser_success_string(start_time, parse_map, elements, debug);
+    let proper_nesting = nest_elements(elements);
+    get_parser_success_string(start_time, parse_map, debug);
     return;
 }
 
