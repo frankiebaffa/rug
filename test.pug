@@ -3,9 +3,19 @@ html(lang="en")
 	head
 		meta(charset="UTF-8")
 	body
-		#main_container.container
-			h1 Hello, World!
-			p This is a paragraph
+		#page_1.page
+			.container
+				h1 Hello, World!
+				p This is a paragraph
+				p.mixed-paragraph
+					span.fas.fa-times
+					span This is a font awesome icon
+			#empty_container
+		#page_2.page
+			.container
+				h1 This is the second page
+				p This is a paragraph again
+				p(hidden,aria-hidden="true") This is a hidden paragraph
 	footer
 		#foot_container.container
 			h5 Goodbye, World!
